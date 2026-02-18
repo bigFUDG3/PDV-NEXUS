@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Badge } from '../components/UI';
+import { Card, Badge, Button } from '../components/UI';
 import { db } from '../services/db';
-import { KPIMetrics, Sale } from '../types';
+import { KPIMetrics, Sale, Product } from '../types';
+import { Link } from 'react-router-dom';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   LineChart, Line
 } from 'recharts';
-import { DollarSign, ShoppingBag, TrendingUp, AlertTriangle, BarChart3, LineChart as LineChartIcon, Clock } from 'lucide-react';
+import { DollarSign, ShoppingBag, TrendingUp, AlertTriangle, BarChart3, LineChart as LineChartIcon, Clock, ArrowRight } from 'lucide-react';
 
 const StatCard: React.FC<{ title: string; value: string; icon: any; trend?: string; color: string }> = ({ title, value, icon: Icon, trend, color }) => (
   <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
@@ -14,7 +15,7 @@ const StatCard: React.FC<{ title: string; value: string; icon: any; trend?: stri
       <div>
         <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</p>
         <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">{value}</p>
-        {trend && <p className="text-xs text-green-600 mt-1 flex items-center gap-1"><TrendingUp size={12}/> {trend}</p>}
+        {trend && <p className="text-xs text-red-600 font-bold mt-1 flex items-center gap-1 animate-pulse"><AlertTriangle size={12}/> {trend}</p>}
       </div>
       <div className={`p-3 rounded-full ${color} bg-opacity-10`}>
         <Icon size={24} className={color.replace('bg-', 'text-')} />
@@ -27,6 +28,7 @@ export const Dashboard: React.FC = () => {
   const [stats, setStats] = useState<KPIMetrics | null>(null);
   const [salesData, setSalesData] = useState<any[]>([]);
   const [recentSales, setRecentSales] = useState<Sale[]>([]);
+  const [lowStockItems, setLowStockItems] = useState<Product[]>([]);
   const [chartType, setChartType] = useState<'bar' | 'line'>('bar');
 
   useEffect(() => {
@@ -34,11 +36,9 @@ export const Dashboard: React.FC = () => {
     setStats(data);
 
     const sales = db.getSales();
-    
-    // Recent Sales List Data (Top 5)
     setRecentSales(sales.slice(0, 5));
+    setLowStockItems(db.getLowStockProducts());
 
-    // Chart Data (Last 10 sales aggregation)
     const last10Sales = sales.slice(0, 10).reverse().map(s => ({
       name: new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       total: s.total
@@ -79,10 +79,45 @@ export const Dashboard: React.FC = () => {
           title="Estoque Baixo" 
           value={stats.lowStockCount.toString()} 
           icon={AlertTriangle} 
-          color="bg-orange-500"
-          trend={stats.lowStockCount > 0 ? "Atenção necessária" : undefined}
+          color={stats.lowStockCount > 0 ? "bg-red-500" : "bg-orange-500"}
+          trend={stats.lowStockCount > 0 ? "Reposição Necessária" : undefined}
         />
       </div>
+
+      {/* Low Stock Alert Section */}
+      {lowStockItems.length > 0 && (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
+           <div className="flex items-center justify-between mb-3">
+              <h3 className="text-red-800 dark:text-red-300 font-bold flex items-center gap-2">
+                 <AlertTriangle size={20} /> Alertas de Estoque ({lowStockItems.length})
+              </h3>
+              <Link to="/inventory">
+                 <Button size="sm" variant="outline" className="text-red-700 border-red-300 hover:bg-red-100 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/40">
+                    Gerenciar Estoque <ArrowRight size={14} className="ml-1"/>
+                 </Button>
+              </Link>
+           </div>
+           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {lowStockItems.slice(0, 3).map(item => (
+                 <div key={item.id} className="bg-white dark:bg-gray-800 p-3 rounded shadow-sm flex justify-between items-center border-l-4 border-red-500">
+                    <div>
+                       <p className="font-medium text-gray-900 dark:text-white truncate">{item.name}</p>
+                       <p className="text-xs text-gray-500">{item.sku}</p>
+                    </div>
+                    <div className="text-right">
+                       <span className="text-red-600 font-bold text-lg">{item.stock}</span>
+                       <span className="text-gray-400 text-xs block">Mín: {item.minStock}</span>
+                    </div>
+                 </div>
+              ))}
+              {lowStockItems.length > 3 && (
+                 <div className="flex items-center justify-center text-sm text-red-600 font-medium">
+                    + {lowStockItems.length - 3} outros produtos críticos
+                 </div>
+              )}
+           </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Chart */}
@@ -172,41 +207,6 @@ export const Dashboard: React.FC = () => {
           </Card>
         </div>
       </div>
-      
-      {/* Insights Row */}
-      <Card title="Insights Rápidos">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="flex items-start gap-3 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-              <div className="mt-1"><TrendingUp size={20} className="text-blue-600 dark:text-blue-400" /></div>
-              <div>
-                <h4 className="font-medium text-blue-900 dark:text-blue-300">Desempenho</h4>
-                <p className="text-sm text-blue-800 dark:text-blue-400 mt-1">
-                  O ticket médio subiu 12% em comparação com a semana passada.
-                </p>
-              </div>
-            </div>
-            
-            <div className="flex items-start gap-3 p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
-              <div className="mt-1"><AlertTriangle size={20} className="text-orange-600 dark:text-orange-400" /></div>
-              <div>
-                <h4 className="font-medium text-orange-900 dark:text-orange-300">Estoque</h4>
-                <p className="text-sm text-orange-800 dark:text-orange-400 mt-1">
-                  {stats.lowStockCount} produtos estão abaixo do nível mínimo de estoque.
-                </p>
-              </div>
-            </div>
-
-             <div className="flex items-start gap-3 p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-              <div className="mt-1"><DollarSign size={20} className="text-green-600 dark:text-green-400" /></div>
-              <div>
-                <h4 className="font-medium text-green-900 dark:text-green-300">Pagamentos</h4>
-                <p className="text-sm text-green-800 dark:text-green-400 mt-1">
-                  Pagamentos via PIX representam 45% das transações.
-                </p>
-              </div>
-            </div>
-          </div>
-        </Card>
     </div>
   );
 };

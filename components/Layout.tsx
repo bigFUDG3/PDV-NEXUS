@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link, useLocation } from 'react-router-dom';
+import { db } from '../services/db';
 import { 
   LayoutDashboard, 
   ShoppingCart, 
@@ -15,14 +16,27 @@ import {
   Moon,
   History,
   Hammer,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Bell
 } from 'lucide-react';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, logout } = useAuth();
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [lowStockCount, setLowStockCount] = useState(0);
   const location = useLocation();
+
+  // Check for notifications periodically or on location change
+  useEffect(() => {
+    const checkStock = () => {
+        const count = db.getLowStockProducts().length;
+        setLowStockCount(count);
+    };
+    checkStock();
+    const interval = setInterval(checkStock, 10000); // Check every 10s
+    return () => clearInterval(interval);
+  }, [location]);
 
   const toggleSidebar = () => setSidebarOpen(!isSidebarOpen);
   const toggleTheme = () => {
@@ -38,7 +52,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     { icon: Hammer, label: 'Serviços', path: '/services' },
     { icon: History, label: 'Vendas', path: '/sales' },
     { icon: FileText, label: 'Relatórios', path: '/reports' },
-    // { icon: Settings, label: 'Configurações', path: '/settings' }, // Placeholder
+    { icon: Settings, label: 'Configurações', path: '/settings' },
   ];
 
   return (
@@ -106,9 +120,19 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </button>
 
           <div className="flex items-center gap-4 ml-auto">
-             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${navigator.onLine ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-red-100 text-red-800'}`}>
+            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${navigator.onLine ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-red-100 text-red-800'}`}>
                 {navigator.onLine ? 'Online' : 'Offline'}
-             </span>
+            </span>
+             
+            <Link to="/inventory" className="relative p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors" title="Alertas de Estoque">
+               <Bell size={20} />
+               {lowStockCount > 0 && (
+                 <span className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+                   {lowStockCount}
+                 </span>
+               )}
+            </Link>
+
             <button 
               onClick={toggleTheme}
               className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"

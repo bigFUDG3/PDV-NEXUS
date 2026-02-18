@@ -1,4 +1,4 @@
-import { Product, User, Sale, AuditLog, Customer, KPIMetrics, Quote, QuoteStatus } from '../types';
+import { Product, User, Sale, AuditLog, Customer, KPIMetrics, Quote, QuoteStatus, StoreConfig } from '../types';
 
 // Initial Data Seeding
 const INITIAL_USERS: User[] = [
@@ -69,6 +69,11 @@ const INITIAL_QUOTES: Quote[] = [
   }
 ];
 
+const DEFAULT_CONFIG: StoreConfig = {
+  maxDiscountPercent: 10,
+  storeName: 'PDV Nexus Store'
+};
+
 class MockDB {
   private products: Product[] = [];
   private users: User[] = [];
@@ -76,6 +81,7 @@ class MockDB {
   private customers: Customer[] = [];
   private quotes: Quote[] = [];
   private auditLogs: AuditLog[] = [];
+  private config: StoreConfig = DEFAULT_CONFIG;
 
   constructor() {
     this.load();
@@ -88,6 +94,7 @@ class MockDB {
     const sCustomers = localStorage.getItem('pdv_customers');
     const sQuotes = localStorage.getItem('pdv_quotes');
     const sLogs = localStorage.getItem('pdv_logs');
+    const sConfig = localStorage.getItem('pdv_config');
 
     this.products = sProducts ? JSON.parse(sProducts) : INITIAL_PRODUCTS;
     this.users = sUsers ? JSON.parse(sUsers) : INITIAL_USERS;
@@ -95,11 +102,13 @@ class MockDB {
     this.customers = sCustomers ? JSON.parse(sCustomers) : INITIAL_CUSTOMERS;
     this.quotes = sQuotes ? JSON.parse(sQuotes) : INITIAL_QUOTES;
     this.auditLogs = sLogs ? JSON.parse(sLogs) : [];
+    this.config = sConfig ? JSON.parse(sConfig) : DEFAULT_CONFIG;
 
     if (!sProducts) this.save('products');
     if (!sUsers) this.save('users');
     if (!sCustomers) this.save('customers');
     if (!sQuotes) this.save('quotes');
+    if (!sConfig) this.save('config');
   }
 
   private save(key: string) {
@@ -109,6 +118,7 @@ class MockDB {
     if (key === 'customers') localStorage.setItem('pdv_customers', JSON.stringify(this.customers));
     if (key === 'quotes') localStorage.setItem('pdv_quotes', JSON.stringify(this.quotes));
     if (key === 'logs') localStorage.setItem('pdv_logs', JSON.stringify(this.auditLogs));
+    if (key === 'config') localStorage.setItem('pdv_config', JSON.stringify(this.config));
   }
 
   // Auth
@@ -116,26 +126,85 @@ class MockDB {
     return this.users.find(u => u.email === email);
   }
 
+  getUserById(id: string): User | undefined {
+    return this.users.find(u => u.id === id);
+  }
+
+  // Config
+  getConfig(): StoreConfig {
+    return this.config;
+  }
+
+  updateConfig(newConfig: Partial<StoreConfig>, userId: string) {
+    this.config = { ...this.config, ...newConfig };
+    this.save('config');
+    this.log(userId, 'CONFIG_UPDATE', 'Configurações do sistema atualizadas', 'SETTINGS');
+  }
+
   // Products & Services
   getProducts(): Product[] {
     return this.products;
+  }
+
+  getLowStockProducts(): Product[] {
+    return this.products.filter(p => p.type === 'PRODUCT' && p.stock <= p.minStock);
   }
   
   getServicesOnly(): Product[] {
     return this.products.filter(p => p.type === 'SERVICE');
   }
   
-  createProduct(product: Product) {
+  createProduct(product: Product, userId?: string) {
     this.products.push(product);
     this.save('products');
+    if (userId) this.log(userId, 'PRODUCT_CREATE', `Produto ${product.name} criado`, 'INVENTORY', product.id);
   }
 
-  updateProductStock(id: string, qtyDelta: number) {
-    const idx = this.products.findIndex(p => p.id === id);
-    if (idx >= 0 && this.products[idx].type === 'PRODUCT') {
-      this.products[idx].stock += qtyDelta;
+  updateProduct(product: Product, userId?: string) {
+    const idx = this.products.findIndex(p => p.id === product.id);
+    if (idx >= 0) {
+      const old = this.products[idx];
+      
+      // Check for stock changes for logging
+      if (old.stock !== product.stock && userId) {
+          const diff = product.stock - old.stock;
+          const action = diff > 0 ? 'STOCK_ADD' : 'STOCK_REMOVE';
+          this.log(userId, action, `Ajuste manual: ${diff > 0 ? '+' : ''}${diff} un. Novo total: ${product.stock}`, 'INVENTORY', product.id);
+      } else if (userId) {
+          this.log(userId, 'PRODUCT_UPDATE', `Dados do produto ${product.name} atualizados`, 'INVENTORY', product.id);
+      }
+
+      this.products[idx] = product;
       this.save('products');
     }
+  }
+
+  deleteProduct(id: string, userId?: string) {
+    const product = this.products.find(p => p.id === id);
+    this.products = this.products.filter(p => p.id !== id);
+    this.save('products');
+    if (userId && product) {
+        this.log(userId, 'PRODUCT_DELETE', `Produto ${product.name} (SKU: ${product.sku}) excluído`, 'INVENTORY', id);
+    }
+  }
+
+  updateProductStock(id: string, qtyDelta: number, userId?: string, reason?: string) {
+    const idx = this.products.findIndex(p => p.id === id);
+    if (idx >= 0 && this.products[idx].type === 'PRODUCT') {
+      const oldStock = this.products[idx].stock;
+      this.products[idx].stock += qtyDelta;
+      this.save('products');
+      
+      if (userId) {
+          const action = qtyDelta > 0 ? 'STOCK_ADD' : 'STOCK_REMOVE';
+          const details = reason || `Movimentação automática: ${qtyDelta > 0 ? '+' : ''}${qtyDelta} un`;
+          this.log(userId, action, details, 'INVENTORY', id);
+      }
+    }
+  }
+
+  getProductLogs(productId: string): AuditLog[] {
+      return this.auditLogs.filter(log => log.entityId === productId).sort((a, b) => b.timestamp - a.timestamp);
   }
 
   // Sales
@@ -143,7 +212,7 @@ class MockDB {
     this.sales.push(sale);
     // Deduct stock
     sale.items.forEach(item => {
-      this.updateProductStock(item.id, -item.quantity);
+      this.updateProductStock(item.id, -item.quantity, sale.userId, `Venda #${sale.id.slice(-6)}`);
     });
     this.save('sales');
     this.log(sale.userId, 'SALE_CREATED', `Venda ${sale.id} realizada valor R$${sale.total.toFixed(2)}`, 'POS');
@@ -178,14 +247,15 @@ class MockDB {
   }
 
   // Audit
-  log(userId: string, action: string, details: string, module: string) {
+  log(userId: string, action: string, details: string, module: string, entityId?: string) {
     const entry: AuditLog = {
       id: Date.now().toString(),
       timestamp: Date.now(),
       userId,
       action,
       details,
-      module
+      module,
+      entityId
     };
     this.auditLogs.unshift(entry);
     this.save('logs');

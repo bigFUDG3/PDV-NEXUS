@@ -35,7 +35,7 @@ export interface Customer {
 
 export interface CartItem extends Product {
   quantity: number;
-  discount: number; // value in currency
+  discount: number; // value in currency (Total discount for the line)
   note?: string;
 }
 
@@ -79,6 +79,7 @@ export interface AuditLog {
   action: string;
   details: string;
   module: string;
+  entityId?: string; // ID of the affected entity (Product ID, Sale ID, etc)
 }
 
 export interface KPIMetrics {
@@ -86,4 +87,9 @@ export interface KPIMetrics {
   totalRevenue: number;
   totalProfit: number;
   lowStockCount: number;
+}
+
+export interface StoreConfig {
+  maxDiscountPercent: number; // 0 to 100
+  storeName: string;
 }

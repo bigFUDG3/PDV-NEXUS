@@ -3,7 +3,7 @@ import { Card, Button, Input, Modal, Badge } from '../components/UI';
 import { db } from '../services/db';
 import { useAuth } from '../context/AuthContext';
 import { Product, CartItem, Customer, Sale, PaymentMethod } from '../types';
-import { Search, Trash2, Plus, Minus, CreditCard, Banknote, QrCode, User as UserIcon, CheckCircle, ChevronLeft, ShoppingBag } from 'lucide-react';
+import { Search, Trash2, Plus, Minus, CreditCard, Banknote, QrCode, User as UserIcon, CheckCircle, ChevronLeft, ShoppingBag, Percent } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export const POS: React.FC = () => {
@@ -27,6 +27,9 @@ export const POS: React.FC = () => {
   // Payment State
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
   const [amountReceived, setAmountReceived] = useState<string>('');
+
+  // Config
+  const [maxDiscountPercent, setMaxDiscountPercent] = useState(100);
   
   // Refs
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -34,6 +37,7 @@ export const POS: React.FC = () => {
   // Initial Load
   useEffect(() => {
     setProducts(db.getProducts());
+    setMaxDiscountPercent(db.getConfig().maxDiscountPercent);
   }, []);
 
   // Keyboard Shortcuts
@@ -62,7 +66,9 @@ export const POS: React.FC = () => {
 
   // Computed
   const subtotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-  const total = subtotal; // simplified discount logic for now
+  const discountTotal = cart.reduce((acc, item) => acc + item.discount, 0);
+  const total = Math.max(0, subtotal - discountTotal);
+
   const categories = ['Todos', ...Array.from(new Set(products.map(p => p.category)))];
   
   const filteredProducts = useMemo(() => {
@@ -96,10 +102,38 @@ export const POS: React.FC = () => {
     setCart(prev => prev.map(item => {
       if (item.id === id) {
         const newQty = Math.max(1, item.quantity + delta);
-        return { ...item, quantity: newQty };
+        // If discount was applied, we might want to keep it proportional or reset it. 
+        // For now, let's keep the absolute value but ensure it doesn't exceed total price if qty drops.
+        const maxDiscount = (item.price * newQty);
+        return { ...item, quantity: newQty, discount: Math.min(item.discount, maxDiscount) };
       }
       return item;
     }));
+  };
+
+  const handleApplyDiscount = (id: string) => {
+    const item = cart.find(c => c.id === id);
+    if (!item) return;
+
+    const input = prompt(`Digite a % de desconto para ${item.name} (Máx: ${maxDiscountPercent}%):`);
+    if (input === null) return;
+
+    const percent = parseFloat(input);
+    if (isNaN(percent) || percent < 0) {
+      alert("Porcentagem inválida.");
+      return;
+    }
+
+    if (percent > maxDiscountPercent) {
+      alert(`Erro: O desconto máximo permitido é de ${maxDiscountPercent}%.`);
+      return;
+    }
+
+    const discountValue = (item.price * item.quantity) * (percent / 100);
+    
+    setCart(prev => prev.map(it => 
+      it.id === id ? { ...it, discount: discountValue } : it
+    ));
   };
 
   const handleBarcodeScan = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -121,7 +155,7 @@ export const POS: React.FC = () => {
       timestamp: Date.now(),
       items: cart,
       subtotal,
-      discountTotal: 0,
+      discountTotal,
       total,
       paymentMethod,
       paymentReceived: receivedVal,
@@ -205,23 +239,48 @@ export const POS: React.FC = () => {
             </div>
           ) : (
             cart.map(item => (
-              <div key={item.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                <div className="flex-1">
+              <div key={item.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg group">
+                <div className="flex-1 min-w-0 mr-2">
                   <p className="font-medium text-gray-900 dark:text-white truncate">{item.name}</p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {item.quantity}x R$ {item.price.toFixed(2)}
-                  </p>
+                  <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                     <span>{item.quantity}x R$ {item.price.toFixed(2)}</span>
+                     {item.discount > 0 && (
+                        <span className="text-green-600 dark:text-green-400 text-xs bg-green-100 dark:bg-green-900/30 px-1 rounded">
+                           -R$ {item.discount.toFixed(2)}
+                        </span>
+                     )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   <div className="flex items-center bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600">
                     <button onClick={() => updateQuantity(item.id, -1)} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-l"><Minus size={14}/></button>
                     <span className="w-8 text-center text-sm font-medium">{item.quantity}</span>
                     <button onClick={() => updateQuantity(item.id, 1)} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-r"><Plus size={14}/></button>
                   </div>
-                  <p className="font-bold w-20 text-right">R$ {(item.price * item.quantity).toFixed(2)}</p>
-                  <button onClick={() => removeFromCart(item.id)} className="text-red-500 hover:text-red-700 p-1">
-                    <Trash2 size={18} />
-                  </button>
+                  
+                  <div className="flex flex-col items-end w-20">
+                     <span className={`font-bold ${item.discount > 0 ? 'text-green-600' : ''}`}>
+                       R$ {((item.price * item.quantity) - item.discount).toFixed(2)}
+                     </span>
+                     {item.discount > 0 && (
+                        <span className="text-xs text-gray-400 line-through">
+                           R$ {(item.price * item.quantity).toFixed(2)}
+                        </span>
+                     )}
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                     <button 
+                        onClick={() => handleApplyDiscount(item.id)}
+                        className="text-gray-400 hover:text-nexus-500 p-1"
+                        title="Desconto"
+                     >
+                        <Percent size={16} />
+                     </button>
+                     <button onClick={() => removeFromCart(item.id)} className="text-red-400 hover:text-red-600 p-1">
+                        <Trash2 size={16} />
+                     </button>
+                  </div>
                 </div>
               </div>
             ))
@@ -230,10 +289,16 @@ export const POS: React.FC = () => {
 
         {/* Totals & Actions */}
         <div className="p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
-          <div className="flex justify-between mb-2 text-gray-600 dark:text-gray-400">
+          <div className="flex justify-between mb-1 text-gray-600 dark:text-gray-400 text-sm">
             <span>Subtotal</span>
             <span>R$ {subtotal.toFixed(2)}</span>
           </div>
+          {discountTotal > 0 && (
+             <div className="flex justify-between mb-2 text-green-600 dark:text-green-400 text-sm">
+               <span>Desconto</span>
+               <span>- R$ {discountTotal.toFixed(2)}</span>
+             </div>
+          )}
           <div className="flex justify-between mb-4 text-2xl font-bold text-nexus-600 dark:text-nexus-400">
             <span>Total</span>
             <span>R$ {total.toFixed(2)}</span>
@@ -329,6 +394,7 @@ export const POS: React.FC = () => {
           <div className="text-center py-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
             <p className="text-sm text-gray-500">Valor Total</p>
             <p className="text-4xl font-bold text-nexus-600">R$ {total.toFixed(2)}</p>
+            {discountTotal > 0 && <p className="text-xs text-green-600 mt-1">(Desconto aplicado: R$ {discountTotal.toFixed(2)})</p>}
           </div>
 
           <div>

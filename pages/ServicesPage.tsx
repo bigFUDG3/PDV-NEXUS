@@ -2,48 +2,138 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { Product } from '../types';
 import { Card, Button, Input, Modal } from '../components/UI';
-import { Search, Plus, Filter, Wrench, Edit2 } from 'lucide-react';
+import { Search, Plus, Wrench, Edit2 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 export const ServicesPage: React.FC = () => {
+  const { user } = useAuth();
   const [services, setServices] = useState<Product[]>([]);
   const [filter, setFilter] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingService, setEditingService] = useState<Product | null>(null);
 
-  // New Service Form State
-  const [newService, setNewService] = useState({
+  // Form State
+  const [formData, setFormData] = useState({
     name: '',
+    sku: '',
+    barcode: '',
     category: '',
     price: '',
-    duration: '30' // stored in sku or logic for now, keeping simple
+    cost: '',
+    stock: '',
+    minStock: '',
+    unit: 'SERV'
+  });
+
+  const [formErrors, setFormErrors] = useState({
+    name: '',
+    price: '',
+    cost: ''
   });
 
   useEffect(() => {
-    setServices(db.getServicesOnly());
+    refreshServices();
   }, []);
+
+  const refreshServices = () => {
+    setServices(db.getServicesOnly());
+  };
 
   const filtered = services.filter(s => 
     s.name.toLowerCase().includes(filter.toLowerCase()) || 
-    s.category.toLowerCase().includes(filter.toLowerCase())
+    s.category.toLowerCase().includes(filter.toLowerCase()) ||
+    s.sku.toLowerCase().includes(filter.toLowerCase())
   );
 
+  const handleOpenModal = (service?: Product) => {
+    setFormErrors({ name: '', price: '', cost: '' }); // Clear errors
+    if (service) {
+      setEditingService(service);
+      setFormData({
+        name: service.name,
+        sku: service.sku,
+        barcode: service.barcode,
+        category: service.category,
+        price: service.price.toString(),
+        cost: service.cost.toString(),
+        stock: service.stock.toString(),
+        minStock: service.minStock.toString(),
+        unit: service.unit
+      });
+    } else {
+      setEditingService(null);
+      setFormData({
+        name: '',
+        sku: `SRV${Math.floor(Math.random() * 10000)}`,
+        barcode: '',
+        category: '',
+        price: '',
+        cost: '0',
+        stock: '9999', // Default high stock for services
+        minStock: '0',
+        unit: 'SERV'
+      });
+    }
+    setIsModalOpen(true);
+  };
+
+  const validateForm = () => {
+    const errors = { name: '', price: '', cost: '' };
+    let isValid = true;
+
+    if (!formData.name.trim()) {
+      errors.name = 'Nome do serviço é obrigatório';
+      isValid = false;
+    }
+
+    const price = parseFloat(formData.price);
+    const cost = parseFloat(formData.cost);
+
+    if (isNaN(price) || price < 0) {
+      errors.price = 'Preço inválido';
+      isValid = false;
+    }
+
+    if (isNaN(cost) || cost < 0) {
+      errors.cost = 'Custo inválido';
+      isValid = false;
+    }
+
+    if (!isNaN(price) && !isNaN(cost) && price < cost) {
+      errors.price = 'O Preço de Venda não pode ser menor que o Custo';
+      isValid = false;
+    }
+
+    setFormErrors(errors);
+    return isValid;
+  };
+
   const handleSave = () => {
-    const service: Product = {
-      id: Date.now().toString(),
-      sku: `SRV${Math.floor(Math.random() * 1000)}`,
-      barcode: '',
-      name: newService.name,
-      category: newService.category || 'Geral',
-      price: parseFloat(newService.price) || 0,
-      cost: 0,
-      stock: 9999, // infinite stock for services
-      minStock: 0,
-      unit: 'SERV',
-      type: 'SERVICE'
+    if (!user) return;
+    if (!validateForm()) return;
+
+    const productData: Product = {
+      id: editingService ? editingService.id : Date.now().toString(),
+      type: 'SERVICE',
+      name: formData.name,
+      sku: formData.sku,
+      barcode: formData.barcode,
+      category: formData.category || 'Geral',
+      price: parseFloat(formData.price) || 0,
+      cost: parseFloat(formData.cost) || 0,
+      stock: parseInt(formData.stock) || 0,
+      minStock: parseInt(formData.minStock) || 0,
+      unit: formData.unit
     };
-    db.createProduct(service);
-    setServices(db.getServicesOnly());
+
+    if (editingService) {
+      db.updateProduct(productData, user.id);
+    } else {
+      db.createProduct(productData, user.id);
+    }
+    
+    refreshServices();
     setIsModalOpen(false);
-    setNewService({ name: '', category: '', price: '', duration: '30' });
   };
 
   return (
@@ -56,7 +146,7 @@ export const ServicesPage: React.FC = () => {
            <p className="text-gray-500 text-sm">Gerencie os serviços oferecidos e seus preços.</p>
         </div>
         <div className="flex gap-2">
-           <Button onClick={() => setIsModalOpen(true)}><Plus size={18} className="mr-2"/> Novo Serviço</Button>
+           <Button onClick={() => handleOpenModal()}><Plus size={18} className="mr-2"/> Novo Serviço</Button>
         </div>
       </div>
 
@@ -64,7 +154,7 @@ export const ServicesPage: React.FC = () => {
         <div className="relative mb-4">
            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
            <Input 
-             placeholder="Buscar serviço..." 
+             placeholder="Buscar serviço por nome, código ou categoria..." 
              className="pl-10"
              value={filter}
              onChange={(e) => setFilter(e.target.value)}
@@ -83,10 +173,14 @@ export const ServicesPage: React.FC = () => {
             </thead>
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
               {filtered.map(service => (
-                <tr key={service.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                <tr 
+                  key={service.id} 
+                  onClick={() => handleOpenModal(service)}
+                  className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors cursor-pointer group"
+                >
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
-                      <div className="h-10 w-10 flex-shrink-0 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center text-blue-600 dark:text-blue-400">
+                      <div className="h-10 w-10 flex-shrink-0 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center text-blue-600 dark:text-blue-400 group-hover:bg-blue-200 dark:group-hover:bg-blue-900/50 transition-colors">
                          <Wrench size={18} />
                       </div>
                       <div className="ml-4">
@@ -125,31 +219,89 @@ export const ServicesPage: React.FC = () => {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title="Novo Serviço"
+        title={editingService ? "Editar Serviço" : "Novo Serviço"}
+        size="lg"
       >
         <div className="space-y-4">
           <Input 
             label="Nome do Serviço" 
             placeholder="Ex: Formatação, Instalação..." 
-            value={newService.name}
-            onChange={e => setNewService({...newService, name: e.target.value})}
+            value={formData.name}
+            onChange={e => setFormData({...formData, name: e.target.value})}
+            error={formErrors.name}
           />
-          <Input 
-            label="Categoria" 
-            placeholder="Ex: Informática" 
-            value={newService.category}
-            onChange={e => setNewService({...newService, category: e.target.value})}
-          />
-          <Input 
-            label="Preço de Venda (R$)" 
-            type="number"
-            placeholder="0.00" 
-            value={newService.price}
-            onChange={e => setNewService({...newService, price: e.target.value})}
-          />
+          
+          <div className="grid grid-cols-2 gap-4">
+            <Input 
+              label="SKU / Código" 
+              value={formData.sku}
+              onChange={e => setFormData({...formData, sku: e.target.value})}
+            />
+            <Input 
+              label="Código de Barras (Opcional)" 
+              value={formData.barcode}
+              onChange={e => setFormData({...formData, barcode: e.target.value})}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Input 
+              label="Categoria" 
+              placeholder="Ex: Informática" 
+              value={formData.category}
+              onChange={e => setFormData({...formData, category: e.target.value})}
+            />
+             <Input 
+              label="Unidade"
+              value={formData.unit}
+              onChange={e => setFormData({...formData, unit: e.target.value})}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Input 
+              label="Custo Operacional (R$)" 
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="0.00" 
+              value={formData.cost}
+              onChange={e => setFormData({...formData, cost: e.target.value})}
+              error={formErrors.cost}
+            />
+            <Input 
+              label="Preço de Venda (R$)" 
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="0.00" 
+              value={formData.price}
+              onChange={e => setFormData({...formData, price: e.target.value})}
+              error={formErrors.price}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+             <Input 
+              label="Estoque Virtual"
+              type="number"
+              value={formData.stock}
+              onChange={e => setFormData({...formData, stock: e.target.value})}
+              placeholder="Geralmente 9999"
+            />
+             <Input 
+              label="Alerta Mínimo"
+              type="number"
+              value={formData.minStock}
+              onChange={e => setFormData({...formData, minStock: e.target.value})}
+            />
+          </div>
+
           <div className="pt-4 flex justify-end gap-3">
              <Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
-             <Button onClick={handleSave} disabled={!newService.name || !newService.price}>Salvar Serviço</Button>
+             <Button onClick={handleSave}>
+               {editingService ? 'Atualizar Serviço' : 'Salvar Serviço'}
+             </Button>
           </div>
         </div>
       </Modal>

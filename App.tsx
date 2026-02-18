@@ -10,6 +10,7 @@ import { Sales } from './pages/Sales';
 import { Reports } from './pages/Reports';
 import { ServicesPage } from './pages/ServicesPage';
 import { Quotes } from './pages/Quotes';
+import { Settings } from './pages/Settings';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated } = useAuth();
@@ -28,6 +29,7 @@ const AppRoutes = () => {
       <Route path="/quotes" element={<ProtectedRoute><Quotes /></ProtectedRoute>} />
       <Route path="/sales" element={<ProtectedRoute><Sales /></ProtectedRoute>} />
       <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+      <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );
