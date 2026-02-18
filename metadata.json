@@ -1,0 +1,5 @@
+{
+  "name": "PDV Nexus",
+  "description": "A comprehensive, responsive Point of Sale (POS) PWA for retail and services with inventory management, financial tracking, and role-based access control.",
+  "requestFramePermissions": []
+}
